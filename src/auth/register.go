@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/dgrijalva/jwt-go"
 	"golang.org/x/crypto/bcrypt"
+	_env "learnity-backend/.env"
 	"learnity-backend/models"
 	"learnity-backend/server"
 	"log"
 	"net/http"
+	"time"
 )
 
 func RegisterHandler(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +72,23 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	newUser.Password = "" // Effacer le mot de passe non chiffré
 	newUser.HashedPassword = string(hashedPassword)
 
+	// Créer un nouveau JWT
+	token := jwt.New(jwt.SigningMethodHS256)
+	claims := token.Claims.(jwt.MapClaims)
+	claims["sub"] = userID                                     // Utiliser l'ID comme identifiant
+	claims["exp"] = time.Now().Add(time.Hour * 24 * 30).Unix() // Expiration en 30 jours
+
+	// Signer le JWT avec la clé secrète
+	tokenString, err := token.SignedString(_env.JwtSecret)
+	if err != nil {
+		http.Error(w, "Erreur lors de la création du token JWT", http.StatusInternalServerError)
+		return
+	}
+
+	// Mettre à jour le token dans l'utilisateur
+	newUser.Token = tokenString
+	newUser.TokenExpireAt = claims["exp"].(int64)
+
 	// Convertir l'utilisateur en JSON et le stocker dans Redis
 	userJSONBytes, err := json.Marshal(newUser)
 	if err != nil {
@@ -87,4 +107,8 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
+	// Répondre avec le token JWT
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]string{"token": tokenString}
+	json.NewEncoder(w).Encode(response)
 }
