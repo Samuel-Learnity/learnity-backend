@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	jwt "github.com/dgrijalva/jwt-go"
-	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
 	_env "learnity-backend/.env"
 	"learnity-backend/models"
 	"learnity-backend/server"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -34,26 +35,53 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Print("LOGIN")
 
-	// Rechercher l'utilisateur par email
-	userKey := fmt.Sprintf("users:%s", credentials.Email)
-	userJSON, err := server.Client.Get(context.Background(), userKey).Result()
-	if err == redis.Nil {
+	// Rechercher l'utilisateur par email parmi tous les utilisateurs
+	var user models.User
+	var userID int
+
+	// Récupérer le nombre total d'utilisateurs
+	totalUsersStr, err := server.Client.Get(context.Background(), "user:id").Result()
+	if err != nil {
+		http.Error(w, "Erreur lors de la récupération du nombre total d'utilisateurs", http.StatusInternalServerError)
+		return
+	}
+
+	totalUsers, err := strconv.Atoi(totalUsersStr)
+	if err != nil {
+		http.Error(w, "Erreur lors de la conversion du nombre total d'utilisateurs en entier", http.StatusInternalServerError)
+		return
+	}
+	// Parcourir tous les utilisateurs
+	for i := 1; i <= totalUsers; i++ {
+		userIDKey := fmt.Sprintf("users:%d", i)
+		userJSON, err := server.Client.Get(context.Background(), userIDKey).Result()
+		if err != nil {
+			// Ignorer les erreurs et passer à l'utilisateur suivant
+			continue
+		}
+
+		err = json.Unmarshal([]byte(userJSON), &user)
+		if err != nil {
+			http.Error(w, "Erreur lors de la désérialisation de l'utilisateur depuis JSON", http.StatusInternalServerError)
+			return
+		}
+
+		// Vérifier si l'e-mail correspond
+		if user.Email == credentials.Email {
+			userID = i
+			break
+		}
+	}
+
+	// Si l'utilisateur n'est pas trouvé, renvoyer une erreur
+	if userID == 0 {
 		http.Error(w, "Utilisateur non trouvé", http.StatusNotFound)
 		return
-	} else if err != nil {
-		http.Error(w, "Erreur lors de la récupération de l'utilisateur depuis Redis", http.StatusInternalServerError)
-		return
 	}
 
-	var user models.User
-	err = json.Unmarshal([]byte(userJSON), &user)
-	if err != nil {
-		http.Error(w, "Erreur lors de la désérialisation de l'utilisateur depuis JSON", http.StatusInternalServerError)
-		return
-	}
-
-	// Vérifier le mot de passe
-	if user.Password != credentials.Password {
+	// Vérifier le mot de passe avec Bcrypt
+	if err := bcrypt.CompareHashAndPassword([]byte(user.HashedPassword), []byte(credentials.Password)); err != nil {
+		log.Print("Mot de passe incorrect 401")
 		http.Error(w, "Mot de passe incorrect", http.StatusUnauthorized)
 		return
 	}
@@ -61,7 +89,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Créer un nouveau JWT
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims := token.Claims.(jwt.MapClaims)
-	claims["sub"] = user.Email                                 // Utiliser l'e-mail comme identifiant
+	claims["sub"] = userID                                     // Utiliser l'ID comme identifiant
 	claims["exp"] = time.Now().Add(time.Hour * 24 * 30).Unix() // Expiration en 30 jours
 
 	// Signer le JWT avec la clé secrète
@@ -83,9 +111,9 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convertir le tableau d'octets en chaîne de caractères
-	userJSON = string(userJSONBytes)
+	userJSON := string(userJSONBytes)
 
-	err = server.Client.Set(context.Background(), userKey, userJSON, 0).Err()
+	err = server.Client.Set(context.Background(), fmt.Sprintf("users:%d", userID), userJSON, 0).Err()
 	if err != nil {
 		http.Error(w, "Erreur lors de la mise à jour de l'utilisateur dans Redis", http.StatusInternalServerError)
 		return
