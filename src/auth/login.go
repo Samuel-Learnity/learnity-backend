@@ -17,6 +17,7 @@ import (
 
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		log.Print("LOGIN FAILED")
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
@@ -29,6 +30,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	err := decoder.Decode(&credentials)
 	if err != nil {
+		log.Print("LOGIN FAILED")
 		http.Error(w, "Erreur lors de la lecture du corps de la demande", http.StatusBadRequest)
 		return
 	}
@@ -42,12 +44,14 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Récupérer le nombre total d'utilisateurs
 	totalUsersStr, err := server.Client.Get(context.Background(), "user:id").Result()
 	if err != nil {
+		log.Print("LOGIN FAILED")
 		http.Error(w, "Erreur lors de la récupération du nombre total d'utilisateurs", http.StatusInternalServerError)
 		return
 	}
 
 	totalUsers, err := strconv.Atoi(totalUsersStr)
 	if err != nil {
+		log.Print("LOGIN FAILED")
 		http.Error(w, "Erreur lors de la conversion du nombre total d'utilisateurs en entier", http.StatusInternalServerError)
 		return
 	}
@@ -62,6 +66,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 		err = json.Unmarshal([]byte(userJSON), &user)
 		if err != nil {
+			log.Print("LOGIN FAILED")
 			http.Error(w, "Erreur lors de la désérialisation de l'utilisateur depuis JSON", http.StatusInternalServerError)
 			return
 		}
@@ -75,6 +80,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Si l'utilisateur n'est pas trouvé, renvoyer une erreur
 	if userID == 0 {
+		log.Print("LOGIN FAILED")
 		http.Error(w, "Utilisateur non trouvé", http.StatusNotFound)
 		return
 	}
@@ -95,6 +101,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Signer le JWT avec la clé secrète
 	tokenString, err := token.SignedString(_env.JwtSecret)
 	if err != nil {
+		log.Print("LOGIN FAILED")
 		http.Error(w, "Erreur lors de la création du token JWT", http.StatusInternalServerError)
 		return
 	}
@@ -106,6 +113,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Mettre à jour l'utilisateur dans Redis
 	userJSONBytes, err := json.Marshal(user)
 	if err != nil {
+		log.Print("LOGIN FAILED")
 		http.Error(w, "Erreur lors de la sérialisation de l'utilisateur en JSON", http.StatusInternalServerError)
 		return
 	}
@@ -115,6 +123,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = server.Client.Set(context.Background(), fmt.Sprintf("users:%d", userID), userJSON, 0).Err()
 	if err != nil {
+		log.Print("LOGIN FAILED")
 		http.Error(w, "Erreur lors de la mise à jour de l'utilisateur dans Redis", http.StatusInternalServerError)
 		return
 	}
